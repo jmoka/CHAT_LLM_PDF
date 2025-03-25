@@ -62,6 +62,11 @@
             background-color: #0073e6;
         }
 
+        #sendButton:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+
         .message {
             max-width: 70%;
             padding: 10px 15px;
@@ -104,6 +109,12 @@
             margin-top: 4px;
             text-align: right;
         }
+
+        .error-message {
+            color: #ff0000;
+            font-size: 12px;
+            margin-top: 5px;
+        }
     </style>
 </head>
 <body>
@@ -117,6 +128,8 @@
 
     <script>
         const chat = document.getElementById('chat');
+        const sendButton = document.getElementById('sendButton');
+        const messageInput = document.getElementById('message');
 
         function getTimestamp() {
             return new Date().toLocaleTimeString('pt-BR', { 
@@ -125,12 +138,12 @@
             });
         }
 
-        function appendMessage(message, isUser = true) {
+        function appendMessage(message, isUser = true, isError = false) {
             const containerDiv = document.createElement('div');
             containerDiv.className = `message-container ${isUser ? 'user-message-container' : 'assistant-message-container'}`;
 
             const messageDiv = document.createElement('div');
-            messageDiv.className = `message ${isUser ? 'user-message' : 'assistant-message'}`;
+            messageDiv.className = `message ${isUser ? 'user-message' : 'assistant-message'} ${isError ? 'error-message' : ''}`;
             messageDiv.textContent = message;
 
             const timeDiv = document.createElement('div');
@@ -147,33 +160,47 @@
         }
 
         function handleKeyPress(event) {
-            if (event.key === 'Enter') {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
                 sendMessage();
             }
         }
 
-        function sendMessage() {
-            const messageInput = document.getElementById('message');
-            const message = messageInput.value;
-            if (message.trim()) {
-                appendMessage(message);
-                messageInput.value = "";
+        function setLoading(isLoading) {
+            sendButton.disabled = isLoading;
+            messageInput.disabled = isLoading;
+            sendButton.textContent = isLoading ? 'Enviando...' : 'Enviar';
+        }
 
-                fetch('http://localhost:3000/chat', {
+        async function sendMessage() {
+            const message = messageInput.value.trim();
+            if (!message) return;
+
+            setLoading(true);
+            messageInput.value = "";
+
+            try {
+                appendMessage(message);
+
+                const response = await fetch('http://localhost:3000/chat', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({ message: message })
-                })
-                .then(response => response.json())
-                .then(data => {
-                    appendMessage(data.response, false);
-                })
-                .catch((error) => {
-                    console.error('Erro:', error);
-                    appendMessage('Erro ao processar a mensagem.', false);
                 });
+
+                if (!response.ok) {
+                    throw new Error('Erro na resposta do servidor');
+                }
+
+                const data = await response.json();
+                appendMessage(data.response, false);
+            } catch (error) {
+                console.error('Erro:', error);
+                appendMessage('Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.', false, true);
+            } finally {
+                setLoading(false);
             }
         }
     </script>

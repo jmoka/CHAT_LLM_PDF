@@ -4,6 +4,7 @@ const axios = require('axios');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const fs = require('fs');
+const path = require('path');
 const pdf = require('pdf-parse');
 
 const app = express();
@@ -13,47 +14,72 @@ app.use(bodyParser.json());
 const PORT = process.env.PORT || 3000;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-// Function to read and process PDF file with better error handling
+// Diretório onde os PDFs estão armazenados
+const directoryPath = path.join(__dirname, 'pdfs');
+
+// Função para ler e processar um único arquivo PDF
 const loadPDF = async (filePath) => {
     try {
         if (!fs.existsSync(filePath)) {
-            throw new Error('PDF file not found');
+            throw new Error(`Arquivo não encontrado: ${filePath}`);
         }
         const dataBuffer = fs.readFileSync(filePath);
         const data = await pdf(dataBuffer);
         return data.text;
     } catch (error) {
-        console.error('Error reading PDF:', error.message);
+        console.error('Erro ao ler PDF:', error.message);
         throw error;
     }
 };
 
-// Process PDF with improved error messages
+// Função para processar todos os PDFs da pasta
 const processPDFFromPath = async () => {
     try {
-        const pdfText = await loadPDF('./jota.pdf');
-        return pdfText;
+        // Lê todos os arquivos da pasta
+        const pdfFiles = fs.readdirSync(directoryPath).filter(file => file.endsWith('.pdf'));
+
+        if (pdfFiles.length === 0) {
+            throw new Error('Nenhum arquivo PDF encontrado na pasta.');
+        }
+
+        // Processa todos os arquivos PDFs
+        const pdfContents = await Promise.all(
+            pdfFiles.map(async (file) => {
+                const filePath = path.join(directoryPath, file);
+                const content = await loadPDF(filePath);
+                return {
+                    fileName: file,
+                    content: content
+                };
+            })
+        );
+
+        return pdfContents;
     } catch (error) {
-        console.error('Error processing PDF:', error.message);
-        return `Error processing PDF: ${error.message}`;
+        console.error('Erro ao processar PDFs:', error.message);
+        return `Erro ao processar PDFs: ${error.message}`;
     }
 };
 
+// Endpoint para processar mensagens do usuário
 app.post('/chat', async (req, res) => {
     try {
         const userMessage = req.body.message;
         const pdfContent = await processPDFFromPath();
 
-        if (pdfContent.startsWith('Error processing PDF')) {
+        if (typeof pdfContent === 'string' && pdfContent.startsWith('Erro')) {
             throw new Error(pdfContent);
         }
+
+        // Junta todos os textos dos PDFs para fornecer contexto
+        const pdfText = pdfContent.map(pdf => `${pdf.fileName}:\n${pdf.content}`).join("\n\n");
 
         const response = await axios.post('https://api.openai.com/v1/chat/completions', {
             model: "gpt-3.5-turbo",
             messages: [
                 { 
                     role: "system", 
-                    content: `Use this PDF content as context for answering questions: ${pdfContent}`
+                    content: `Use este conteúdo extraído dos PDFs para responder às perguntas:\n${pdfText}`
                 },
                 { 
                     role: "user", 
@@ -72,7 +98,7 @@ app.post('/chat', async (req, res) => {
         const botReply = response.data.choices[0].message.content;
         res.json({ response: botReply });
     } catch (error) {
-        console.error('Error:', error.message);
+        console.error('Erro:', error.message);
         res.status(500).json({ 
             error: 'Erro ao processar a solicitação.',
             details: error.message 
@@ -80,6 +106,7 @@ app.post('/chat', async (req, res) => {
     }
 });
 
+// Inicia o servidor
 app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+    console.log(`Servidor rodando na porta ${PORT}`);
 });
